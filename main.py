@@ -32,6 +32,10 @@ class Website(StatesGroup):
     remove = State()
 
 
+class Admin(StatesGroup):
+    timer = State()
+
+
 def _get(val):
     with open('./websites.json', 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -144,9 +148,36 @@ async def add_website(message: types.Message, state: FSMContext):
 @dp.callback_query_handler(state='*')
 async def callback(call: CallbackQuery, state: FSMContext):
     await call.answer('⌛...')
+    if call.data == 'cancel':
+        await state.finish()
+        await call.message.delete()
     if '?' in call.data:
         _edit(str(call.from_user.id), call.data.split('?')[0], 'True' if call.data.split('?')[1] == 'yes' else 'False')
         await call.message.edit_reply_markup(reply_markup=ping_markup(str(call.from_user.id), website=call.data.split('?')[0]))
+
+
+@dp.message_handler(state=Admin.timer)
+async def timer(message: types.Message, state: FSMContext):
+    msg = (await state.get_data())['msg']
+    if message.text.isdigit() is False: await msg.edit_text(text='Message you sent is not a number!'); return await message.delete()
+    with open('./websites.json', 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    data['timer'] = message.text
+    with open('./websites.json', 'w', encoding='utf-8') as f:
+        json.dump(data, f)
+    await message.delete()
+    await msg.edit_text(text=f'Successfully set timer time to {_get("timer")} mins.')
+    await state.finish()
+
+
+@dp.message_handler(commands=['timer'])
+async def timer(message: types.Message, state: FSMContext):
+    if message.from_user.id == int(os.getenv('ADMIN')):
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton(text='Cancel', callback_data='cancel'))
+        msg = await message.reply(f'Current timer: {_get("timer")} mins. Write new one', reply_markup=markup)
+        await Admin.timer.set()
+        await state.update_data(msg=msg)
 
 
 async def on_startup(dp):
