@@ -23,9 +23,6 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 bot = Bot(os.getenv('TOKEN'))
 dp = Dispatcher(bot, storage=MemoryStorage())
 
-global started
-started = False
-
 
 class Website(StatesGroup):
     add = State()
@@ -68,7 +65,7 @@ def _delete(dic, val=None):
     with open('./websites.json', 'r', encoding='utf-8') as f:
         data = json.load(f)
     try:
-        if val is not None: data[dic].append(val)
+        if val is not None: data[dic].pop(val)
         else: data.pop(str(dic))
         with open('./websites.json', 'w', encoding='utf-8') as f:
             json.dump(data, f)
@@ -77,7 +74,10 @@ def _delete(dic, val=None):
 
 
 def my_commands():
-    return[types.bot_command.BotCommand(command='add', description=f'Add new link to ping every {_get("timer")} mins.')]
+    return[
+        types.bot_command.BotCommand(command='add', description=f'Add new link to ping every {_get("timer")} mins.'),
+        types.bot_command.BotCommand(command='websites', description=f'List of your websites.')
+    ]
 
 
 def ping_markup(user, website):
@@ -114,10 +114,24 @@ async def start(message: types.Message, state: FSMContext):
     await message.reply(f'{_get("timer")}')
 
 
+@dp.message_handler(commands=['websites'])
+async def my_websites(message: types.Message, state: FSMContext):
+    _sign(f'{message.from_user.id}')
+    await bot.set_my_commands(commands=my_commands())
+    user = _get(f'{message.from_user.id}')
+    if len(user) == 0: return await message.reply('You didnt set any website to ping!')
+    markup = InlineKeyboardMarkup()
+    for website in user:
+        markup.add(InlineKeyboardButton(text=website, callback_data=f'web>{website}'))
+    await message.reply('List of your websites...', reply_markup=markup)
+
+
 @dp.message_handler(commands=['add'])
 async def add(message: types.Message, state: FSMContext):
     _sign(f'{message.from_user.id}')
-    msg = await message.reply(f'Alright, a new website to ping. Send me a link...')
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton(text='Cancel', callback_data='cancel'))
+    msg = await message.reply(f'Alright, a new website to ping. Send me a link...', reply_markup=markup)
     await Website.add.set()
     await state.update_data(msg=msg)
 
@@ -144,16 +158,53 @@ async def add_website(message: types.Message, state: FSMContext):
         await msg.edit_text(f'Alright. I added new website `{message.text}`, should i send you message when i will ping it?'.replace(".", "\."), parse_mode='MarkdownV2', reply_markup=ping_markup(str(message.from_user.id), website=message.text))
 
 
-
 @dp.callback_query_handler(state='*')
 async def callback(call: CallbackQuery, state: FSMContext):
     await call.answer('⌛...')
+    print(call.data)
     if call.data == 'cancel':
         await state.finish()
         await call.message.delete()
     if '?' in call.data:
         _edit(str(call.from_user.id), call.data.split('?')[0], 'True' if call.data.split('?')[1] == 'yes' else 'False')
         await call.message.edit_reply_markup(reply_markup=ping_markup(str(call.from_user.id), website=call.data.split('?')[0]))
+    if '>' in call.data:
+        try: website = call.data.split('>')[1]
+        except: pass
+        if call.data.startswith('web>'):
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton(text='Disable / Enable ping message', callback_data=f'pin>{website}'))
+            markup.add(InlineKeyboardButton(text='Remove', callback_data=f'rem>{website}'))
+            markup.add(InlineKeyboardButton(text='↩', callback_data='list>'))
+            await call.message.edit_text(text=f'{website}\nSend message on ping: {_get(str(call.from_user.id))[website]}', reply_markup=markup)
+        if call.data.startswith('p-'):
+            _edit(str(call.from_user.id), website, 'True' if call.data.split('>')[0][-1] == 'T' else 'False')
+            user = _get(f'{call.from_user.id}')
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton(text='✅ YES' if user[str(website)] == 'True' else "YES",
+                                            callback_data=f'p-T>{website}'))
+            markup.add(InlineKeyboardButton(text='✅ NO' if user[str(website)] == 'False' else "NO",
+                                            callback_data=f'p-F>{website}'))
+            markup.add(InlineKeyboardButton(text='↩️', callback_data=f'web>{website}'))
+            await call.message.edit_reply_markup(reply_markup=markup)
+        if call.data.startswith('pin>'):
+            user = _get(f'{call.from_user.id}')
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton(text='✅ YES' if user[str(website)] == 'True' else "YES",
+                                            callback_data=f'p-T>{website}'))
+            markup.add(InlineKeyboardButton(text='✅ NO' if user[str(website)] == 'False' else "NO",
+                                            callback_data=f'p-F>{website}'))
+            markup.add(InlineKeyboardButton(text='↩️', callback_data=f'web>{website}'))
+            await call.message.edit_reply_markup(reply_markup=markup)
+        if call.data.startswith('rem>'):
+            _delete(f'{call.from_user.id}', website)
+            await call.message.delete()
+        if call.data.startswith('list>'):
+            user = _get(f'{call.from_user.id}')
+            markup = InlineKeyboardMarkup()
+            for website in user:
+                markup.add(InlineKeyboardButton(text=website, callback_data=f'web>{website}'))
+            await call.message.edit_reply_markup(reply_markup=markup)
 
 
 @dp.message_handler(state=Admin.timer)
@@ -183,6 +234,6 @@ async def timer(message: types.Message, state: FSMContext):
 async def on_startup(dp):
     asyncio.create_task(ping())
 
+
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
-
