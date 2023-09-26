@@ -6,3 +6,5 @@ https://t.me/replit_robot
 # Installation
 1. create .env file with bot token ("TOKEN") and your user id ("ADMIN")
 2. run main.py
+
+bbg
